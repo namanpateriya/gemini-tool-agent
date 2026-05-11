@@ -1,0 +1,25 @@
+# Install dependencies
+pip install -r requirements.txt
+
+# Run CLI
+python -m app.cli --message "Calculate 20% of 500"
+
+# Store memory
+python -m app.cli --message "Remember that I like football"
+
+# Retrieve memory
+python -m app.cli --message "What sports do I like?"
+
+# Read local file
+python -m app.cli --message "Read notes.txt and summarize it"
+
+# Run API
+uvicorn app.main:app --reload
+
+# Open Swagger UI
+http://127.0.0.1:8000/docs
+
+# API Example
+curl -X POST "http://127.0.0.1:8000/chat" \
+-H "Content-Type: application/json" \
+-d '{"message":"Calculate 15% of 240"}'
