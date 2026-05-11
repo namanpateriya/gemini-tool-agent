@@ -359,7 +359,7 @@ Potential future improvements:
 
 See:
 ```text
-references/README.md
+references/REF.md
 ```
 
 for ecosystem references and inspiration sources.
