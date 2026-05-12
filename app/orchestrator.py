@@ -1,7 +1,13 @@
 import json
 
+from pydantic import ValidationError
+
 from app.config import (
     MAX_TOOL_ITERATIONS
+)
+
+from app.schemas import (
+    ToolPlan
 )
 
 from app.tools.registry import (
@@ -26,7 +32,9 @@ class ToolOrchestrator:
 
     def __init__(self):
 
-        self.available_tools = list_tools()
+        self.available_tools = (
+            list_tools()
+        )
 
     def build_tool_selection_prompt(
         self,
@@ -43,12 +51,12 @@ Available tools:
 
 Rules:
 - Respond ONLY in valid JSON
-- Do not include markdown
-- Do not explain reasoning
-- If no tools required, return empty tools array
+- Never include markdown
+- Never explain reasoning
+- If no tools required return empty tools array
 - Use concise tool inputs
 
-Output format:
+Allowed output format:
 {{
   "tools": [
     {{
@@ -75,35 +83,61 @@ User message:
                 "tools": [],
                 "error": response.get(
                     "message",
-                    "tool planning failed"
+                    "planning failed"
                 )
             }
 
-        data = response.get("data", {})
+        data = response.get(
+            "data",
+            {}
+        )
 
-        tools = data.get("tools", [])
+        raw_tools = data.get(
+            "tools",
+            []
+        )
 
-        if not isinstance(tools, list):
+        validated_tools = []
+
+        try:
+
+            for tool in raw_tools:
+
+                validated = ToolPlan(
+                    **tool
+                )
+
+                validated_tools.append(
+                    validated.dict()
+                )
+
+            return {
+                "success": True,
+                "tools": validated_tools
+            }
+
+        except ValidationError as e:
+
+            logger.error(
+                f"Tool validation failed: {e}"
+            )
 
             return {
                 "success": False,
                 "tools": [],
                 "error": (
-                    "tools must be a list"
+                    "invalid tool schema"
                 )
             }
-
-        return {
-            "success": True,
-            "tools": tools
-        }
 
     def execute_tool(
         self,
         tool_payload
     ):
 
-        tool_name = tool_payload.get("tool")
+        tool_name = tool_payload.get(
+            "tool"
+        )
 
         action = tool_payload.get(
             "action"
@@ -117,7 +151,9 @@ User message:
             f"Executing tool: {tool_name}"
         )
 
-        tool_meta = get_tool(tool_name)
+        tool_meta = get_tool(
+            tool_name
+        )
 
         if not tool_meta:
 
@@ -133,14 +169,12 @@ User message:
 
         try:
 
-            # Calculator Tool
             if tool_name == "calculator":
 
                 result = tool.execute(
                     tool_input
                 )
 
-            # Memory Tool
             elif tool_name == "memory":
 
                 if action == "store":
@@ -155,7 +189,6 @@ User message:
                         tool_input
                     )
 
-            # File Reader Tool
             elif tool_name == "file_reader":
 
                 result = tool.execute(
@@ -185,7 +218,7 @@ User message:
         except Exception as e:
 
             logger.error(
-                f"Tool execution failed: {e}"
+                f"Execution failed: {e}"
             )
 
             return {
@@ -203,17 +236,25 @@ User message:
         prompt = f"""
 You are a conversational AI assistant.
 
+STRICT RULES:
+- ONLY use provided tool results
+- NEVER invent information
+- NEVER hallucinate outputs
+- If tool failed, acknowledge failure
+- Keep response concise
+
 User message:
 {user_message}
 
 Tool execution results:
 {json.dumps(tool_results, indent=2)}
 
-Generate a concise conversational response.
-Use tool outputs where relevant.
+Generate the final response.
 """
 
-        return client.generate(prompt)
+        return client.generate(
+            prompt
+        )
 
     def run(
         self,
@@ -230,13 +271,10 @@ Use tool outputs where relevant.
                 "response": (
                     "empty message"
                 ),
+                "confidence": 0.0,
                 "tools_used": [],
                 "tool_results": []
             }
-
-        logger.info(
-            "Starting orchestration"
-        )
 
         planning_prompt = (
             self.build_tool_selection_prompt(
@@ -263,18 +301,16 @@ Use tool outputs where relevant.
                 "response": (
                     parsed_plan["error"]
                 ),
+                "confidence": 0.0,
                 "tools_used": [],
                 "tool_results": []
             }
 
         planned_tools = (
-            parsed_plan["tools"]
+            parsed_plan["tools"][
+                :MAX_TOOL_ITERATIONS
+            ]
         )
-
-        # Prevent excessive loops
-        planned_tools = planned_tools[
-            :MAX_TOOL_ITERATIONS
-        ]
 
         tool_results = []
 
@@ -286,7 +322,9 @@ Use tool outputs where relevant.
                 tool_payload
             )
 
-            tool_results.append(result)
+            tool_results.append(
+                result
+            )
 
             if result["success"]:
 
@@ -301,9 +339,21 @@ Use tool outputs where relevant.
             )
         )
 
+        confidence = (
+            round(
+                len(tools_used)
+                / max(
+                    len(planned_tools),
+                    1
+                ),
+                2
+            )
+        )
+
         return {
             "status": "success",
             "response": final_response,
+            "confidence": confidence,
             "tools_used": tools_used,
             "tool_results": tool_results
         }
