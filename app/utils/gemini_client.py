@@ -1,12 +1,17 @@
 import json
+import time
+
 import google.generativeai as genai
 
 from app.config import (
     GEMINI_API_KEY,
-    MODEL_NAME
+    MODEL_NAME,
+    MAX_GEMINI_RETRIES
 )
 
-from app.utils.logger import get_logger
+from app.utils.logger import (
+    get_logger
+)
 
 logger = get_logger(__name__)
 
@@ -18,75 +23,125 @@ class GeminiClient:
         self.model = None
 
         if not GEMINI_API_KEY:
+
             logger.warning(
                 "Missing GEMINI_API_KEY"
             )
+
             return
 
         try:
+
             genai.configure(
                 api_key=GEMINI_API_KEY
             )
 
-            self.model = genai.GenerativeModel(
-                MODEL_NAME
+            self.model = (
+                genai.GenerativeModel(
+                    MODEL_NAME
+                )
             )
 
             logger.info(
-                f"Gemini initialized with model: {MODEL_NAME}"
+                f"Gemini initialized "
+                f"with model: {MODEL_NAME}"
             )
 
         except Exception as e:
+
             logger.error(
-                f"Gemini initialization failed: {e}"
+                f"Gemini init failed: {e}"
             )
 
-    def generate(self, prompt: str):
+    def generate(
+        self,
+        prompt: str
+    ):
 
         if self.model is None:
-            return "error: Gemini model not initialized"
 
-        try:
-
-            response = self.model.generate_content(
-                prompt
+            return (
+                "error: Gemini model "
+                "not initialized"
             )
 
-            if (
-                hasattr(response, "text")
-                and response.text
-            ):
-                return response.text.strip()
+        last_error = None
 
-            return "error: empty response"
+        for attempt in range(
+            MAX_GEMINI_RETRIES
+        ):
 
-        except Exception as e:
+            try:
 
-            logger.error(
-                f"Gemini generation failed: {e}"
-            )
+                response = (
+                    self.model.generate_content(
+                        prompt
+                    )
+                )
 
-            return f"error: {str(e)}"
+                if (
+                    hasattr(response, "text")
+                    and response.text
+                ):
 
-    def generate_json(self, prompt: str):
+                    return (
+                        response.text.strip()
+                    )
 
-        response = self.generate(prompt)
+                last_error = (
+                    "empty response"
+                )
 
-        if response.startswith("error:"):
+            except Exception as e:
+
+                last_error = str(e)
+
+                logger.error(
+                    f"Gemini attempt "
+                    f"{attempt + 1} failed: "
+                    f"{e}"
+                )
+
+                time.sleep(1)
+
+        return f"error: {last_error}"
+
+    def generate_json(
+        self,
+        prompt: str
+    ):
+
+        response = self.generate(
+            prompt
+        )
+
+        if response.startswith(
+            "error:"
+        ):
+
             return {
                 "status": "error",
                 "message": response
             }
 
         try:
+
             cleaned = (
                 response
-                .replace("```json", "")
-                .replace("```", "")
+                .replace(
+                    "```json",
+                    ""
+                )
+                .replace(
+                    "```",
+                    ""
+                )
                 .strip()
             )
 
-            parsed = json.loads(cleaned)
+            parsed = json.loads(
+                cleaned
+            )
 
             return {
                 "status": "success",
@@ -96,11 +151,13 @@ class GeminiClient:
         except Exception as e:
 
             logger.error(
-                f"JSON parsing failed: {e}"
+                f"JSON parse failed: {e}"
             )
 
             return {
                 "status": "error",
-                "message": "invalid json response",
+                "message": (
+                    "invalid json response"
+                ),
                 "raw_response": response
             }
